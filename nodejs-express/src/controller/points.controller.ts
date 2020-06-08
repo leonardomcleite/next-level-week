@@ -5,20 +5,33 @@ class PointsController {
 
   async findAll(request: Request, response: Response) {
     const {city, uf, items} = request.query
-    const parsedItems = String(items).split(',').map(item => Number(item.trim()))
+
+    let parsedItems: number[] = [];
+    String(items).split(',').forEach(item => {
+      if (!isNaN(Number(item.trim())))
+        parsedItems.push(Number(item.trim()))
+    });
 
     let points = await connection('points')
-    .join('point_items', 'points.id', '=', 'point_items.point_id')
-    .whereIn('point_items.item_id', parsedItems)
+    .join('points_items', 'points.id', '=', 'points_items.point_id')
+    .whereIn('points_items.item_id', parsedItems)
     .where('city', String(city))
     .where('uf', String(uf))
     .distinct()
     .select('points.*')
 
+
     if (!points)
       return response.status(400).json({message: 'Pontos de coleta não encontrados'})
 
-    return response.json(points)
+    const serializedPoints = points.map(point => {
+      return {
+        ...point,
+        image_url: `http://192.168.15.98:3333/uploads/${point.image}`
+      }
+    });
+
+    return response.json(serializedPoints)
   }
 
   async create(request: Request, response: Response) {
@@ -33,11 +46,13 @@ class PointsController {
       uf,
       items
     } = request.body;
+
+    
   
     const trx = await connection.transaction();
 
     const point = {
-      image: image || '',
+      image: request.file.filename,
       name,
       email,
       whatsapp,
@@ -49,11 +64,17 @@ class PointsController {
   
     const insertedIds = await trx('points').insert(point)
   
-    const pointsItems = items.map((items_id: number) => ({
-      points_id: insertedIds[0],
-      items_id,
+    let parsedItems: number[] = [];
+    String(items).split(',').forEach(item => {
+      if (!isNaN(Number(item.trim())))
+        parsedItems.push(Number(item.trim()))
+    });
+
+    const pointsItems = parsedItems.map((item_id: number) => ({
+      point_id: insertedIds[0],
+      item_id,
     }))
-  
+
     await trx('points_items').insert(pointsItems)
 
     await trx.commit()
@@ -69,12 +90,13 @@ class PointsController {
       return response.status(400).json({message: 'Ponto de coleta não encontrado'})
     
     const items = await connection('items')
-      .join('point_items', 'item.id', '=', 'point_items.item_id')
-      .where('point_items.point_id', id)
+      .join('points_items', 'items.id', '=', 'points_items.item_id')
+      .where('points_items.point_id', id)
+      .select('*')
 
-    point = {...point, items}
+    const serializedPoints = {...point, image_url: `http://192.168.15.98:3333/uploads/${point.image}`, items}
 
-    return response.json(point)
+    return response.json(serializedPoints)
   }
 
 }
